@@ -1,0 +1,25 @@
+plugins:
+  - rubocop-rails
+  - rubocop-performance
+  - rubocop-rake
+  - rubocop-rspec
+  - rubocop-rspec_rails
+
+AllCops:
+  TargetRubyVersion: 4.0
+  NewCops: enable
+  Exclude:
+    - "bin/**/*"
+    - "db/*schema.rb"
+    - "node_modules/**/*"
+    - "storage/**/*"
+    - "tmp/**/*"
+    - "vendor/**/*"
+
+# Rails generates files without a frozen_string_literal magic comment.
+Style/FrozenStringLiteralComment:
+  Enabled: false
+
+# Rails' own idiom for classes; requiring a top-level comment on every one is noise.
+Style/Documentation:
+  Enabled: false

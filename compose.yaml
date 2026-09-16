@@ -1,0 +1,28 @@
+# Local development services.
+name: moonlit_sandfox
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: moonlit-sandfox-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: moonlit_sandfox
+      POSTGRES_PASSWORD: moonlit_sandfox
+      # Rails creates the _development and _test databases itself via db:prepare.
+      POSTGRES_DB: moonlit_sandfox_development
+    ports:
+      # Shares 5432 with retrobunny-db; only one runs at a time.
+      - "5432:5432"
+    volumes:
+      # Postgres 18+ wants the mount at /var/lib/postgresql, not .../data.
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U moonlit_sandfox -d moonlit_sandfox_development"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  postgres_data:
