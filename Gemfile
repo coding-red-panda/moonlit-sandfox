@@ -16,6 +16,9 @@ gem 'turbo-rails'
 gem 'stimulus-rails'
 # Build JSON APIs with ease [https://github.com/rails/jbuilder]
 gem 'jbuilder'
+# Pinned: json 3.x removed the positional options hash that ActiveSupport::JSON.decode
+# still passes, which breaks all cookie and session deserialization on Rails 8.1.
+gem 'json', '~> 2.7'
 
 # Use Active Model has_secure_password [https://guides.rubyonrails.org/active_model_basics.html#securepassword]
 # gem "bcrypt", "~> 3.1.7"
@@ -48,6 +51,7 @@ group :development, :test do
   gem 'factory_bot_rails'
   gem 'rspec-rails'
   gem 'shoulda-matchers'
+  gem 'webmock'
 
   # Ruby static code analyzer and formatter [https://rubocop.org]
   gem 'rubocop', require: false

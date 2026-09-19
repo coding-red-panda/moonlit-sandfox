@@ -9,6 +9,13 @@ Rails.application.routes.draw do
   # get "manifest" => "rails/pwa#manifest", as: :pwa_manifest
   # get "service-worker" => "rails/pwa#service_worker", as: :pwa_service_worker
 
+  # Battle.net authentication (see docs/adr/002-authentication.md).
+  # The redirect to Battle.net is a POST so it carries CSRF protection.
+  get 'login' => 'authentication#login', as: :login
+  post 'auth/battle_net' => 'authentication#create', as: :battle_net_auth
+  get 'callback' => 'authentication#callback', as: :callback
+  delete 'logout' => 'authentication#destroy', as: :logout
+
   # Defines the root path route ("/")
-  # root "posts#index"
+  root 'authentication#login'
 end
