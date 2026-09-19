@@ -1,24 +1,20 @@
-# README
+# Moonlit Sandfox Website
 
-This README would normally document whatever steps are necessary to get the
-application up and running.
+This is the website for the World of Warcraft guild **Moonlit Sandfox**.
+The website acts as the main entry point for everything and tracks everything
+the guild does in World of Warcraft and other games that we play.
 
-Things you may want to cover:
+# Project Structure
 
-* Ruby version
-
-* System dependencies
-
-* Configuration
-
-* Database creation
-
-* Database initialization
-
-* How to run the test suite
-
-* Services (job queues, cache servers, search engines, etc.)
-
-* Deployment instructions
-
-* ...
+* `app`: Application Logic
+* `bin`: Executables
+* `config`: Configuration for the website
+* `db`: Database related files
+* `docs`: Detailed documentation about the project
+* `lib`: Shared library code
+* `log`: Folder for all log files
+* `public`: Public, static files
+* `script`: Scripts that can be executed for one-off tasks
+* `storage`: ActiveStorage related content
+* `tmp`: Temporary folder
+* `vendor`: JavaScript files

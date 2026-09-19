@@ -1,0 +1,13 @@
+<% content_for :title, 'Sign in' %>
+
+<main>
+  <h1>Moonlit Sandfox</h1>
+
+  <% if signed_in? %>
+    <p>Signed in as <strong><%= current_account.battletag %></strong>.</p>
+    <%= button_to 'Sign out', logout_path, method: :delete %>
+  <% else %>
+    <p>Sign in with your Battle.net account to reach the guild areas of the site.</p>
+    <%= button_to 'Connect with Battle.net', battle_net_auth_path %>
+  <% end %>
+</main>

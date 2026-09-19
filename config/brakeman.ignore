@@ -1,0 +1,9 @@
+{
+  "ignored_warnings": [
+    {
+      "fingerprint": "1f561da6d7fdeb3cb6c415e4999cc5a77467b61c458614198f3f458646721ca8",
+      "note": "Intentional off-site redirect to the Battle.net authorization endpoint. The URL is built entirely from config/battle_net.yml and Rails credentials; no request parameter reaches it. See docs/adr/002-authentication.md."
+    }
+  ],
+  "brakeman_version": "7.1.0"
+}

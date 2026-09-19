@@ -29,3 +29,12 @@
 
 en:
   hello: "Hello world"
+
+  authentication:
+    signed_in: "Signed in as %{battletag}."
+    signed_out: "Signed out."
+    required: "Please sign in to continue."
+    cancelled: "Battle.net sign-in was cancelled."
+    invalid_state: "Battle.net sign-in could not be verified. Please try again."
+    missing_code: "Battle.net did not return an authorization code."
+    unavailable: "Battle.net could not be reached. Please try again."

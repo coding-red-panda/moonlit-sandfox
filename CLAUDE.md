@@ -6,7 +6,10 @@
 - **PostgreSQL 18** in Docker (see Database below) — no local Postgres install
 - **Frontend**: Propshaft + ImportMap + Hotwire (Turbo & Stimulus). No Node build step, no React.
 - **Background jobs / cache / cable**: Solid Queue, Solid Cache, Solid Cable — all backed by Postgres. **Not Sidekiq, no Redis.**
-- **Testing**: RSpec (`rspec-rails`) + factory_bot + shoulda-matchers
+- **Testing**: RSpec (`rspec-rails`) + factory_bot + shoulda-matchers + webmock
+- **`json` is pinned to `~> 2.7`.** json 3.x dropped the positional options hash that
+  `ActiveSupport::JSON.decode` still passes, which breaks *all* cookie and session
+  deserialization on Rails 8.1. Do not unpin without re-testing sessions.
 - **Deploy**: not yet decided. A production `Dockerfile` exists; Kamal was deliberately removed.
 - **Dev environment**: WSL2 (Debian) on Windows, with Docker Desktop's WSL integration
 
@@ -79,13 +82,34 @@ RuboCop uses the **official gem with stock defaults** (`rubocop` plus the `rails
 
 The test job uses `db:prepare`, not `db:test:prepare` — the latter exits non-zero when `db/schema.rb` does not exist yet.
 
+## Authentication
+
+Battle.net OAuth2, hand-rolled in `AuthenticationController` — **no OmniAuth**. See
+`docs/adr/002-authentication.md` for the full decision; `omniauth-bnet` is deliberately
+rejected (unmaintained since 2018, pins the vulnerable OmniAuth 1.x line).
+
+- Endpoints live on `oauth.battle.net`; data APIs on `eu.api.blizzard.com`. Different hosts.
+- Non-secret config in `config/battle_net.yml`; `client_id`/`client_secret` in credentials.
+- Access tokens are **never persisted** — Battle.net issues no usable refresh token, so the
+  callback spends the token in-request and discards it.
+- `accounts.battle_net_id` is the `sub` claim, not the battletag (battletags are mutable).
+- The session holds nothing but `account_id`. `current_account` / `signed_in?` /
+  `require_authentication` live in `ApplicationController`.
+- PKCE is unavailable on Battle.net, so `state` is the only forgery defence. Do not drop it.
+- **Browse to `http://localhost:3000`, not the `http://127.0.0.1:3000` that `bin/dev` prints.**
+  Session cookies are per-host, so starting the flow on one and returning on the other loses
+  the state and fails the login. `create` redirects to the canonical host to prevent this;
+  request specs must `host! 'localhost'`.
+
+Only the identity half is built. Guild membership, character ranks and permissions are
+phase two and still need decisions — see the ADR.
+
 ## Not yet decided
 
 Do not assume these exist; ask before building on them.
 
-- **Authentication** — nothing is installed. No Devise, no OmniAuth, no `has_secure_password`.
-- **Authorization** — no Pundit or CanCan.
-- **Domain models** — `app/models` contains only `ApplicationRecord`. There are no migrations and no `db/schema.rb` yet.
+- **Authorization** — no Pundit or CanCan. Guild-rank permissions are not built.
+- **Domain models** — `app/models` has `Account` and `BattleNet::Client` only.
 - **Soft deletes, admin UI, API layer** — none.
 
 ## Conventions

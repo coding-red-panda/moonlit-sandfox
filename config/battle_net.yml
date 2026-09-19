@@ -1,0 +1,23 @@
+# Non-secret Battle.net configuration (see docs/adr/002-authentication.md).
+# The client id and secret live in Rails credentials under `battle_net`.
+#
+# The redirect_uri must be registered byte-for-byte on the Battle.net developer
+# portal, including scheme, port and path.
+default: &default
+  authorize_url: https://oauth.battle.net/authorize
+  token_url: https://oauth.battle.net/token
+  userinfo_url: https://oauth.battle.net/userinfo
+  scope: openid wow.profile
+
+development:
+  <<: *default
+  redirect_uri: http://localhost:3000/callback
+
+test:
+  <<: *default
+  redirect_uri: http://localhost:3000/callback
+
+production:
+  <<: *default
+  # TODO: replace with the production host and register it on the developer portal.
+  redirect_uri: https://moonlit-sandfox.example.com/callback
