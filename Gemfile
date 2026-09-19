@@ -35,7 +35,13 @@ gem 'solid_queue'
 gem 'bootsnap', require: false
 
 # Use Active Storage variants [https://guides.rubyonrails.org/active_storage_overview.html#transforming-images]
-gem 'image_processing', '~> 1.2'
+gem 'image_processing', '~> 2.1'
+# image_processing 2.0 made mini_magick/ruby-vips soft dependencies, so the backend Active
+# Storage defaults to (:vips) has to be declared here, or variants raise LoadError at runtime.
+# require: false because active_storage/vips requires it itself, early enough to disable
+# libvips' unfuzzed loaders. The libvips C library is a separate install: see the apt lines
+# in .github/workflows/ci.yml and the Dockerfile.
+gem 'ruby-vips', require: false
 
 group :development, :test do
   # See https://guides.rubyonrails.org/debugging_rails_applications.html#debugging-with-the-debug-gem
