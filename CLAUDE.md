@@ -7,9 +7,13 @@
 - **Frontend**: Propshaft + ImportMap + Hotwire (Turbo & Stimulus). No Node build step, no React.
 - **Background jobs / cache / cable**: Solid Queue, Solid Cache, Solid Cable — all backed by Postgres. **Not Sidekiq, no Redis.**
 - **Testing**: RSpec (`rspec-rails`) + factory_bot + shoulda-matchers + webmock
-- **`json` is pinned to `~> 2.7`.** json 3.x dropped the positional options hash that
-  `ActiveSupport::JSON.decode` still passes, which breaks *all* cookie and session
-  deserialization on Rails 8.1. Do not unpin without re-testing sessions.
+- **`json` is pinned to `< 3`.** json 3.x takes parser options as keywords, but
+  `ActiveSupport::JSON.decode` still passes them positionally, which breaks *all* cookie
+  and session deserialization on Rails 8.1 (`ArgumentError: wrong number of arguments
+  (given 2, expected 1)`). This is rails/rails#58685 — closed as fixed by rails/rails#58601
+  (`::JSON.parse(json, **options)`), backported to `8-1-stable`, but **not in any released
+  Rails 8.1.x as of 8.1.3.1**. The pin lifts via a Rails bump, not a json bump. Close
+  Dependabot json PRs until then, and re-test sessions when unpinning.
 - **Deploy**: not yet decided. A production `Dockerfile` exists; Kamal was deliberately removed.
 - **Dev environment**: WSL2 (Debian) on Windows, with Docker Desktop's WSL integration
 
