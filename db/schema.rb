@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_19_073805) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_20_090000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -21,5 +21,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_19_073805) do
     t.datetime "last_login_at"
     t.datetime "updated_at", null: false
     t.index ["battle_net_id"], name: "index_accounts_on_battle_net_id", unique: true
+  end
+
+  create_table "settings", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "key", null: false
+    t.datetime "updated_at", null: false
+    t.string "value"
+    t.index ["key"], name: "index_settings_on_key", unique: true
   end
 end

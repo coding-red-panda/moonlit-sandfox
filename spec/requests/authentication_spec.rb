@@ -3,6 +3,8 @@ require 'rails_helper'
 RSpec.describe 'Authentication', type: :request do
   let(:token_url) { 'https://oauth.battle.net/token' }
   let(:userinfo_url) { 'https://oauth.battle.net/userinfo' }
+  let(:profile_url) { 'https://eu.api.blizzard.com/profile/user/wow' }
+  let(:roster_url) { 'https://eu.api.blizzard.com/data/wow/guild/silvermoon/moonlit-sandfox/roster' }
 
   before do
     # Must match the host in the configured redirect URI, or the flow refuses to start.
@@ -21,6 +23,16 @@ RSpec.describe 'Authentication', type: :request do
       body: { sub: sub, battletag: battletag }.to_json,
       headers: { 'Content-Type' => 'application/json' }
     )
+    stub_wow_api
+  end
+
+  # The World of Warcraft data is pulled in the same request, while the token lives.
+  def stub_wow_api(status: 200)
+    stub_request(:get, %r{\Ahttps://eu\.api\.blizzard\.com/}).to_return(
+      status: status,
+      body: { wow_accounts: [] }.to_json,
+      headers: { 'Content-Type' => 'application/json' }
+    )
   end
 
   # Drives POST /auth/battle_net and returns the state we were issued.
@@ -32,7 +44,9 @@ RSpec.describe 'Authentication', type: :request do
   # Walks the whole happy path: consent, callback, session.
   def complete_flow(**claims)
     stub_battle_net(**claims)
-    get callback_path, params: { code: 'auth-code', state: begin_flow }
+    state = begin_flow
+    yield if block_given?
+    get callback_path, params: { code: 'auth-code', state: state }
   end
 
   describe 'GET /login' do
@@ -174,6 +188,43 @@ RSpec.describe 'Authentication', type: :request do
 
       expect(flash[:alert]).to include('could not be reached')
       expect(session[:account_id]).to be_nil
+    end
+  end
+
+  describe 'GET /callback pulling World of Warcraft data' do
+    it 'reads the profile while the access token is still live' do
+      complete_flow
+
+      expect(a_request(:get, profile_url).with(query: hash_including('namespace' => 'profile-eu'))).to have_been_made
+    end
+
+    it 'reads the roster of the guild named in the settings' do
+      Setting['guild.realm_slug'] = 'silvermoon'
+      Setting['guild.name_slug'] = 'moonlit-sandfox'
+
+      complete_flow
+
+      expect(a_request(:get, roster_url).with(query: hash_including('namespace' => 'profile-eu'))).to have_been_made
+    end
+
+    it 'does not read a roster when no guild is configured' do
+      complete_flow
+
+      expect(a_request(:get, %r{/data/wow/guild/})).not_to have_been_made
+    end
+
+    it 'records the payload for inspection' do
+      complete_flow
+
+      expect(Services::PayloadRecorder.directory.glob('*-wow-profile.json')).not_to be_empty
+    end
+
+    # Identity is established without it; the data is refreshed on the next login.
+    it 'still signs the user in when the profile call fails', :aggregate_failures do
+      complete_flow { stub_wow_api(status: 503) }
+
+      expect(session[:account_id]).to eq(Account.last.id)
+      expect(response).to redirect_to(root_path)
     end
   end
 
