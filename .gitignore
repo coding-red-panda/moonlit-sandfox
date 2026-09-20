@@ -30,6 +30,10 @@
 
 /public/assets
 
+# Raw Battle.net API responses recorded during a login. They contain real account
+# and character data and must never be committed. See docs/adr/002-authentication.md.
+/log/payloads/
+
 # Ignore key files for decrypting credentials and more.
 /config/*.key
 

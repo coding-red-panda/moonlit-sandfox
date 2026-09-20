@@ -64,6 +64,8 @@ RuboCop uses the **official gem with stock defaults** (`rubocop` plus the `rails
 - **Always run `bin/rubocop -A` after any `rails generate`**, or the generated file will fail lint.
 - Only two cops are disabled: `Style/FrozenStringLiteralComment` and `Style/Documentation`.
 - The repo is at zero offences. Keep it there.
+- Controllers need to remain lean and pass business logic to service objects in `app/models/services`
+- Models remain lean and act purely as POCO objects with basic AR logic for validation.
 
 ## Testing
 
@@ -95,7 +97,17 @@ rejected (unmaintained since 2018, pins the vulnerable OmniAuth 1.x line).
 - Endpoints live on `oauth.battle.net`; data APIs on `eu.api.blizzard.com`. Different hosts.
 - Non-secret config in `config/battle_net.yml`; `client_id`/`client_secret` in credentials.
 - Access tokens are **never persisted** — Battle.net issues no usable refresh token, so the
-  callback spends the token in-request and discards it.
+  callback spends the token in-request and discards it. `Client#authenticate` returns a
+  `BattleNet::Session` holding the live token; anything needing WoW data must run inside
+  that request.
+- `Services::GuildSynchronization` pulls the WoW profile and guild roster on every login
+  and dumps them to `log/payloads` (gitignored). It writes nothing to the database and
+  never raises — a failed pull must not cost the user their login.
+- The guild to match against lives in the `settings` table, not in config:
+  `guild.realm_slug` = `argent-dawn`, `guild.name_slug` = `moonlit-sandfox`. Seeded by
+  `bin/rails db:seed`; if cleared, the roster call is skipped and login still works.
+- Guild and roster endpoints need no user token — a `client_credentials` token is enough.
+  Only `/profile/user/wow` requires the signed-in user's session.
 - `accounts.battle_net_id` is the `sub` claim, not the battletag (battletags are mutable).
 - The session holds nothing but `account_id`. `current_account` / `signed_in?` /
   `require_authentication` live in `ApplicationController`.
@@ -105,19 +117,22 @@ rejected (unmaintained since 2018, pins the vulnerable OmniAuth 1.x line).
   the state and fails the login. `create` redirects to the canonical host to prevent this;
   request specs must `host! 'localhost'`.
 
-Only the identity half is built. Guild membership, character ranks and permissions are
-phase two and still need decisions — see the ADR.
+ADR-002 is complete: identity, and the guild data fetch that feeds off it, are both built.
+Turning ranks into permissions is authorization and belongs to a future ADR, which is itself
+blocked on an admin panel ADR. Do not build rank-based permissions before those exist.
 
 ## Not yet decided
 
 Do not assume these exist; ask before building on them.
 
 - **Authorization** — no Pundit or CanCan. Guild-rank permissions are not built.
-- **Domain models** — `app/models` has `Account` and `BattleNet::Client` only.
+- **Domain models** — `app/models` has `Account`, `Setting`, `BattleNet::Client`,
+  `BattleNet::Session` and the `Services::` objects only. Nothing models characters,
+  guilds or ranks yet — login records the raw API responses to `log/payloads` instead.
 - **Soft deletes, admin UI, API layer** — none.
 
 ## Conventions
 
-- Follow default Rails structure. Do not add `app/services`, `app/components` or similar without asking; prefer models, concerns and `app/views/shared`.
+- Follow default Rails structure. Do not add `app/services`, `app/components` or similar without asking; prefer models, concerns and `app/views/shared`. Service objects live under `app/models/services/` (namespace `Services::`), which keeps them inside an existing autoload root.
 - Prefer Hotwire over custom JavaScript.
 - Keep the project inside the WSL filesystem (`~/src/...`). Running it from `/mnt/c` is dramatically slower.

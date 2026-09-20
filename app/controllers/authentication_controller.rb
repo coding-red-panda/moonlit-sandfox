@@ -25,9 +25,7 @@ class AuthenticationController < ApplicationController
     rejection = rejection_reason(session.delete(:battle_net_state))
     return failure(rejection) if rejection
 
-    claims = BattleNet::Client.new.userinfo(code: params[:code])
-
-    sign_in(Account.from_userinfo(claims))
+    sign_in(authenticate(params[:code]))
   end
 
   # DELETE /logout — clears our session only; the Battle.net SSO session remains.
@@ -38,6 +36,16 @@ class AuthenticationController < ApplicationController
   end
 
   private
+
+  # Establishes identity and pulls the World of Warcraft data in the same request:
+  # the access token does not outlive it, so there is no second chance.
+  def authenticate(code)
+    battle_net = BattleNet::Client.new.authenticate(code: code)
+    account = Account.from_userinfo(battle_net.userinfo)
+    Services::GuildSynchronization.new(account: account, session: battle_net).call
+
+    account
+  end
 
   def callback_uri
     @callback_uri ||= URI(BattleNet::Client.new.redirect_uri)

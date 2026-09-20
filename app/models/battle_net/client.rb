@@ -1,10 +1,12 @@
 require 'net/http'
 
 module BattleNet
-  # Minimal Battle.net OAuth2 / OIDC client covering the authorization code flow.
+  # Minimal Battle.net OAuth2 / OIDC client covering the authorization code flow
+  # and the handful of World of Warcraft profile endpoints we read during a login.
   #
-  # Access tokens are deliberately never returned or stored: Battle.net issues no
-  # usable refresh token, so a token is exchanged and spent within a single request.
+  # Access tokens are deliberately never stored: Battle.net issues no usable refresh
+  # token, so a token is exchanged and spent within a single request. Every call that
+  # needs one takes it as an argument rather than holding it.
   # See docs/adr/002-authentication.md.
   class Client
     class Error < StandardError
@@ -38,10 +40,28 @@ module BattleNet
       uri.to_s
     end
 
-    # Exchanges an authorization code for an access token and immediately spends it
-    # on the userinfo endpoint. Returns the OIDC claims, notably `sub` and `battletag`.
-    def userinfo(code:)
-      fetch_userinfo(exchange_code(code))
+    # Exchanges an authorization code for a Session holding the live access token.
+    # The Session is valid for the current request only and is never persisted.
+    def authenticate(code:)
+      Session.new(client: self, access_token: exchange_code(code))
+    end
+
+    # The OIDC claims, notably `sub` and `battletag`.
+    def userinfo(access_token:)
+      get(@config.fetch(:userinfo_url), access_token: access_token)
+    end
+
+    # The signed-in user's World of Warcraft account: their characters, each with
+    # the realm and guild it belongs to. Requires the `wow.profile` scope.
+    def wow_profile(access_token:)
+      api_get('/profile/user/wow', access_token: access_token)
+    end
+
+    # The full roster of a guild, including each member's rank. Ranks are integers
+    # where 0 is the Guild Master.
+    def guild_roster(realm_slug:, name_slug:, access_token:)
+      api_get("/data/wow/guild/#{escape(realm_slug)}/#{escape(name_slug)}/roster",
+              access_token: access_token)
     end
 
     private
@@ -57,8 +77,19 @@ module BattleNet
       body['access_token'].presence || raise(Error, 'Battle.net returned no access token')
     end
 
-    def fetch_userinfo(access_token)
-      uri = URI(@config.fetch(:userinfo_url))
+    # Data APIs are region-specific and need the namespace and locale on every call.
+    def api_get(path, access_token:)
+      uri = URI.join(@config.fetch(:api_url), path)
+      uri.query = URI.encode_www_form(
+        namespace: @config.fetch(:namespace),
+        locale: @config.fetch(:locale)
+      )
+
+      get(uri.to_s, access_token: access_token)
+    end
+
+    def get(url, access_token:)
+      uri = URI(url)
       request = Net::HTTP::Get.new(uri)
       request['Authorization'] = "Bearer #{access_token}"
       request['Accept'] = 'application/json'
@@ -96,6 +127,10 @@ module BattleNet
       JSON.parse(response.body)
     rescue JSON::ParserError => e
       raise Error, "Battle.net returned malformed JSON: #{e.message}"
+    end
+
+    def escape(segment)
+      ERB::Util.url_encode(segment.to_s)
     end
 
     def client_id

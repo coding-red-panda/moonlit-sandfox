@@ -3,11 +3,17 @@
 #
 # The redirect_uri must be registered byte-for-byte on the Battle.net developer
 # portal, including scheme, port and path.
+#
+# The OAuth endpoints are region-independent and live on oauth.battle.net. The data
+# APIs are region-specific; we are a European guild, so they are always the EU host.
 default: &default
   authorize_url: https://oauth.battle.net/authorize
   token_url: https://oauth.battle.net/token
   userinfo_url: https://oauth.battle.net/userinfo
   scope: openid wow.profile
+  api_url: https://eu.api.blizzard.com
+  namespace: profile-eu
+  locale: en_GB
 
 development:
   <<: *default

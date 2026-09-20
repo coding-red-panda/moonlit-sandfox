@@ -31,7 +31,7 @@ RSpec.describe BattleNet::Client, type: :model do
     end
   end
 
-  describe '#userinfo' do
+  describe '#authenticate' do
     before do
       stub_request(:post, token_url).to_return(
         body: { access_token: 'live-token', token_type: 'bearer' }.to_json,
@@ -44,28 +44,28 @@ RSpec.describe BattleNet::Client, type: :model do
     end
 
     it 'returns the userinfo claims' do
-      expect(client.userinfo(code: 'auth-code')).to include(
+      expect(client.authenticate(code: 'auth-code').userinfo).to include(
         'sub' => '987654321',
         'battletag' => 'Sandfox#2145'
       )
     end
 
     it 'authenticates the token request with HTTP Basic rather than body params' do
-      client.userinfo(code: 'auth-code')
+      client.authenticate(code: 'auth-code').userinfo
 
       expect(a_request(:post, token_url)
         .with(headers: { 'Authorization' => "Basic #{basic_auth}" })).to have_been_made
     end
 
     it 'keeps the client secret out of the request body' do
-      client.userinfo(code: 'auth-code')
+      client.authenticate(code: 'auth-code').userinfo
 
       expect(a_request(:post, token_url).with { |req| req.body.include?('client_secret') })
         .not_to have_been_made
     end
 
     it 'sends the authorization code and redirect uri to the token endpoint' do
-      client.userinfo(code: 'auth-code')
+      client.authenticate(code: 'auth-code').userinfo
 
       expect(a_request(:post, token_url)
         .with(body: hash_including('grant_type' => 'authorization_code', 'code' => 'auth-code',
@@ -73,10 +73,55 @@ RSpec.describe BattleNet::Client, type: :model do
     end
 
     it 'spends the access token on the userinfo endpoint as a bearer token' do
-      client.userinfo(code: 'auth-code')
+      client.authenticate(code: 'auth-code').userinfo
 
       expect(a_request(:get, userinfo_url)
         .with(headers: { 'Authorization' => 'Bearer live-token' })).to have_been_made
+    end
+  end
+
+  describe 'World of Warcraft data endpoints' do
+    # Plain methods rather than lets: the outer group already memoizes its quota.
+    def profile_url
+      'https://eu.api.blizzard.com/profile/user/wow'
+    end
+
+    def roster_url
+      'https://eu.api.blizzard.com/data/wow/guild/silvermoon/moonlit-sandfox/roster'
+    end
+
+    def query
+      { namespace: 'profile-eu', locale: 'en_GB' }
+    end
+
+    before do
+      stub_request(:get, /eu\.api\.blizzard\.com/).to_return(
+        body: { members: [] }.to_json, headers: { 'Content-Type' => 'application/json' }
+      )
+    end
+
+    it 'reads the profile from the EU host with the namespace and locale' do
+      client.wow_profile(access_token: 'live-token')
+
+      expect(a_request(:get, profile_url).with(query: query)).to have_been_made
+    end
+
+    it 'sends the access token as a bearer token' do
+      client.wow_profile(access_token: 'live-token')
+
+      expect(a_request(:get, profile_url)
+        .with(query: query, headers: { 'Authorization' => 'Bearer live-token' })).to have_been_made
+    end
+
+    it 'builds the roster path from the realm and guild slugs' do
+      client.guild_roster(realm_slug: 'silvermoon', name_slug: 'moonlit-sandfox',
+                          access_token: 'live-token')
+
+      expect(a_request(:get, roster_url).with(query: query)).to have_been_made
+    end
+
+    it 'returns the parsed body' do
+      expect(client.wow_profile(access_token: 'live-token')).to eq('members' => [])
     end
   end
 
@@ -84,7 +129,7 @@ RSpec.describe BattleNet::Client, type: :model do
     it 'raises when the token endpoint rejects the code' do
       stub_request(:post, token_url).to_return(status: 400, body: '{"error":"invalid_grant"}')
 
-      expect { client.userinfo(code: 'bad') }.to raise_error(described_class::Error, /400/)
+      expect { client.authenticate(code: 'bad').userinfo }.to raise_error(described_class::Error, /400/)
     end
 
     it 'raises when the token endpoint returns no access token' do
@@ -92,21 +137,21 @@ RSpec.describe BattleNet::Client, type: :model do
         body: '{}', headers: { 'Content-Type' => 'application/json' }
       )
 
-      expect { client.userinfo(code: 'auth-code') }
+      expect { client.authenticate(code: 'auth-code').userinfo }
         .to raise_error(described_class::Error, /no access token/)
     end
 
     it 'raises when the response is not JSON' do
       stub_request(:post, token_url).to_return(body: '<html>gateway error</html>')
 
-      expect { client.userinfo(code: 'auth-code') }
+      expect { client.authenticate(code: 'auth-code').userinfo }
         .to raise_error(described_class::Error, /malformed JSON/)
     end
 
     it 'raises when the connection times out' do
       stub_request(:post, token_url).to_timeout
 
-      expect { client.userinfo(code: 'auth-code') }
+      expect { client.authenticate(code: 'auth-code').userinfo }
         .to raise_error(described_class::Error, /request failed/)
     end
 
