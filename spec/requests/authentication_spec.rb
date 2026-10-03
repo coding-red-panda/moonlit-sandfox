@@ -96,6 +96,81 @@ RSpec.describe 'Authentication', type: :request do
     end
   end
 
+  describe 'GET /login showing the roster' do
+    # Lazy, so it resolves after complete_flow has created the account.
+    let(:wow_account) { create(:world_of_warcraft_account, account: Account.last) }
+
+    def sign_in_and_reload
+      complete_flow
+      yield
+      get login_path
+    end
+
+    def character_with(**attributes)
+      create(:world_of_warcraft_character, world_of_warcraft_account: wow_account, **attributes)
+    end
+
+    def create_guilded_character
+      create(:world_of_warcraft_character, :in_guild, world_of_warcraft_account: wow_account)
+    end
+
+    def guild_rank(rank, name, officer: false)
+      create(:world_of_warcraft_guild_rank, rank: rank, name: name, officer: officer)
+    end
+
+    it 'says so while the background job has not reported back' do
+      sign_in_and_reload { nil }
+
+      expect(response.body).to include('your characters are fetched just after you sign in')
+    end
+
+    it 'lists a character with its realm, class and level', :aggregate_failures do
+      sign_in_and_reload do
+        character_with(name: 'Keento', realm_slug: 'argent-dawn',
+                       character_class: 'Warrior', level: 90)
+      end
+
+      expect(response.body).to include('Keento', 'Argent Dawn', 'Warrior', '90')
+    end
+
+    it 'shows the rank held on a character' do
+      sign_in_and_reload { character_with(world_of_warcraft_guild_rank: guild_rank(1, 'Council')) }
+
+      expect(response.body).to include('Council')
+    end
+
+    it 'marks an officer rank as one' do
+      sign_in_and_reload do
+        character_with(world_of_warcraft_guild_rank: guild_rank(0, 'Caravan Leader', officer: true))
+      end
+
+      expect(response.body).to include('(officer)')
+    end
+
+    it 'says the player holds no rank when none of their characters are in the guild' do
+      sign_in_and_reload { character_with }
+
+      expect(response.body).to include('no character of yours is on the guild roster')
+    end
+
+    it "shows no other account's characters" do
+      sign_in_and_reload { create(:world_of_warcraft_character, name: 'Stranger') }
+
+      expect(response.body).not_to include('Stranger')
+    end
+
+    # The ranks are preloaded, so the page costs the same whether the player has one
+    # character or twenty. Without that, each row would fetch its own rank.
+    it 'does not query a rank per character' do
+      complete_flow
+      create_guilded_character
+      baseline = count_queries { get login_path }
+      2.times { create_guilded_character }
+
+      expect(count_queries { get login_path }).to eq(baseline)
+    end
+  end
+
   describe 'GET /callback' do
     it 'creates an account and starts a session', :aggregate_failures do
       stub_battle_net
@@ -112,10 +187,19 @@ RSpec.describe 'Authentication', type: :request do
       expect(response).to redirect_to(root_path)
     end
 
-    it 'keeps nothing but the account id in the session' do
+    it 'keeps nothing but the account id and the expiry in the session' do
       complete_flow
 
-      expect(session.to_hash.keys - %w[flash session_id]).to contain_exactly('account_id')
+      expect(session.to_hash.keys - %w[flash session_id])
+        .to contain_exactly('account_id', 'expires_at')
+    end
+
+    it 'starts a session that expires twelve hours from now' do
+      freeze_time do
+        complete_flow
+
+        expect(session[:expires_at]).to eq(12.hours.from_now.to_i)
+      end
     end
 
     it 'never puts the access token in the session' do
@@ -192,39 +276,62 @@ RSpec.describe 'Authentication', type: :request do
   end
 
   describe 'GET /callback pulling World of Warcraft data' do
-    it 'reads the profile while the access token is still live' do
+    it 'hands the pull to a background job' do
       complete_flow
 
-      expect(a_request(:get, profile_url).with(query: hash_including('namespace' => 'profile-eu'))).to have_been_made
+      expect(FetchCharactersJob).to have_been_enqueued.with(Account.last, anything)
     end
 
-    it 'reads the roster of the guild named in the settings' do
-      Setting['guild.realm_slug'] = 'silvermoon'
-      Setting['guild.name_slug'] = 'moonlit-sandfox'
-
+    # The whole point of the job is that the login does not wait on Battle.net.
+    it 'reads no World of Warcraft data during the request itself' do
       complete_flow
 
-      expect(a_request(:get, roster_url).with(query: hash_including('namespace' => 'profile-eu'))).to have_been_made
+      expect(a_request(:get, %r{\Ahttps://eu\.api\.blizzard\.com/})).not_to have_been_made
     end
 
-    it 'does not read a roster when no guild is configured' do
+    it 'seals the access token rather than passing it in the clear' do
       complete_flow
 
-      expect(a_request(:get, %r{/data/wow/guild/})).not_to have_been_made
+      expect(enqueued_jobs.last[:args].to_s).not_to include('live-token')
     end
 
-    it 'records the payload for inspection' do
+    # Unsealing it again is what proves the envelope is the token, not a placeholder.
+    it 'seals an envelope the job can open' do
+      complete_flow
+      envelope = enqueued_jobs.last[:args].last
+
+      expect(BattleNet::AccessToken.unseal(envelope)).to be_a(BattleNet::AccessToken)
+    end
+  end
+
+  # There is no protected route yet, so /login is the signal: it renders the
+  # battletag for a live session and the connect button for a dead one.
+  describe 'session expiry' do
+    it 'keeps the session alive inside twelve hours' do
+      complete_flow
+      travel 11.hours
+
+      get login_path
+
+      expect(response.body).to include('Sandfox#2145')
+    end
+
+    it 'signs the user out once twelve hours have passed', :aggregate_failures do
+      complete_flow
+      travel 12.hours + 1.minute
+
+      get login_path
+
+      expect(response.body).to include('Connect with Battle.net')
+      expect(session[:account_id]).to be_nil
+    end
+
+    it 'restarts the clock on a fresh login' do
+      complete_flow
+      travel_to 11.hours.from_now
       complete_flow
 
-      expect(Services::PayloadRecorder.directory.glob('*-wow-profile.json')).not_to be_empty
-    end
-
-    # Identity is established without it; the data is refreshed on the next login.
-    it 'still signs the user in when the profile call fails', :aggregate_failures do
-      complete_flow { stub_wow_api(status: 503) }
-
-      expect(session[:account_id]).to eq(Account.last.id)
-      expect(response).to redirect_to(root_path)
+      expect(session[:expires_at]).to eq(12.hours.from_now.to_i)
     end
   end
 

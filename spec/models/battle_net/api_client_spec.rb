@@ -1,6 +1,6 @@
 require 'rails_helper'
 
-RSpec.describe BattleNet::Client, type: :model do
+RSpec.describe BattleNet::ApiClient, type: :model do
   subject(:client) { described_class.new(credentials: credentials) }
 
   let(:credentials) { { client_id: 'test-client', client_secret: 'test-secret' } }
@@ -28,6 +28,56 @@ RSpec.describe BattleNet::Client, type: :model do
 
     it 'never leaks the client secret' do
       expect(url.to_s).not_to include('test-secret')
+    end
+  end
+
+  describe '#authenticate_application' do
+    before do
+      stub_request(:post, token_url).to_return(
+        body: { access_token: 'application-token' }.to_json,
+        headers: { 'Content-Type' => 'application/json' }
+      )
+    end
+
+    # Guild and roster endpoints are game data: no user has to be present, which
+    # is what lets a background job read them after the login has finished.
+    it 'asks for a client credentials token' do
+      client.authenticate_application
+
+      expect(a_request(:post, token_url)
+        .with(body: hash_including('grant_type' => 'client_credentials'))).to have_been_made
+    end
+
+    it 'authenticates with HTTP Basic rather than body params', :aggregate_failures do
+      client.authenticate_application
+
+      expect(a_request(:post, token_url)
+        .with(headers: { 'Authorization' => "Basic #{basic_auth}" })).to have_been_made
+      expect(a_request(:post, token_url).with(body: /test-secret/)).not_to have_been_made
+    end
+
+    context 'when the application token is spent on the guild roster' do
+      before do
+        stub_request(:get, %r{/data/wow/guild/}).to_return(
+          body: { members: [] }.to_json, headers: { 'Content-Type' => 'application/json' }
+        )
+        client.authenticate_application
+              .guild_roster(realm_slug: 'argent-dawn', name_slug: 'moonlit-sandfox')
+      end
+
+      it 'sends it as the bearer token' do
+        expect(a_request(:get, %r{/data/wow/guild/})
+          .with(headers: { 'Authorization' => 'Bearer application-token' })).to have_been_made
+      end
+    end
+
+    it 'raises when Battle.net returns no token' do
+      stub_request(:post, token_url).to_return(
+        body: {}.to_json, headers: { 'Content-Type' => 'application/json' }
+      )
+
+      expect { client.authenticate_application }
+        .to raise_error(described_class::Error, /no application token/)
     end
   end
 

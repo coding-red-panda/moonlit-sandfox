@@ -5,11 +5,45 @@ RSpec.describe Account, type: :model do
 
   it { is_expected.to validate_presence_of(:battle_net_id) }
   it { is_expected.to validate_presence_of(:battletag) }
+  it { is_expected.to have_many(:world_of_warcraft_accounts).class_name('WorldOfWarcraft::Account') }
+  it { is_expected.to have_many(:characters).through(:world_of_warcraft_accounts) }
 
   it 'rejects a duplicate battle_net_id' do
     create(:account, battle_net_id: '123456789')
 
     expect(build(:account, battle_net_id: '123456789')).not_to be_valid
+  end
+
+  describe '#highest_guild_rank' do
+    subject(:account) { create(:account) }
+
+    let(:wow_account) { create(:world_of_warcraft_account, account: account) }
+
+    def character_ranked(rank)
+      create(:world_of_warcraft_character, world_of_warcraft_account: wow_account,
+                                           world_of_warcraft_guild_rank: rank)
+    end
+
+    it 'is nil before the roster job has run' do
+      create(:world_of_warcraft_character, world_of_warcraft_account: wow_account)
+
+      expect(account.highest_guild_rank).to be_nil
+    end
+
+    # Rank 0 is the Guild Master, so the best rank is the lowest number.
+    it 'is the lowest rank number held on any character' do
+      character_ranked(create(:world_of_warcraft_guild_rank, rank: 7, name: 'Caravan Friend'))
+      character_ranked(create(:world_of_warcraft_guild_rank, rank: 1, name: 'Council'))
+
+      expect(account.highest_guild_rank.name).to eq('Council')
+    end
+
+    it 'ignores the ranks of other accounts' do
+      create(:world_of_warcraft_character,
+             world_of_warcraft_guild_rank: create(:world_of_warcraft_guild_rank, rank: 0))
+
+      expect(account.highest_guild_rank).to be_nil
+    end
   end
 
   describe '.from_userinfo' do

@@ -5,6 +5,48 @@
 
   <% if signed_in? %>
     <p>Signed in as <strong><%= current_account.battletag %></strong>.</p>
+
+    <p>
+      Guild rank:
+      <% if @guild_rank %>
+        <strong><%= @guild_rank.name %></strong><%= ' (officer)' if @guild_rank.officer? %>
+      <% else %>
+        <strong>none</strong> — no character of yours is on the guild roster.
+      <% end %>
+    </p>
+
+    <h2>Characters</h2>
+
+    <% if @characters.any? %>
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Name</th>
+            <th scope="col">Realm</th>
+            <th scope="col">Class</th>
+            <th scope="col">Level</th>
+            <th scope="col">Rank</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% @characters.each do |character| %>
+            <tr>
+              <td><%= character.name %></td>
+              <td><%= character.realm_slug.titleize %></td>
+              <td><%= character.character_class %></td>
+              <td><%= character.level %></td>
+              <td><%= character.world_of_warcraft_guild_rank&.name || '—' %></td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    <% else %>
+      <%# The pull runs in the background after the redirect, so a fresh login %>
+      <%# lands here before it has finished. %>
+      <p>Nothing yet — your characters are fetched just after you sign in.
+        <%= link_to 'Reload', login_path %> in a moment.</p>
+    <% end %>
+
     <%= button_to 'Sign out', logout_path, method: :delete %>
   <% else %>
     <p>Sign in with your Battle.net account to reach the guild areas of the site.</p>

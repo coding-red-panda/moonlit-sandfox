@@ -23,3 +23,29 @@
 }.each do |key, value|
   Setting.find_or_create_by!(key: key) { |setting| setting.value = value }
 end
+
+# The guild's rank ladder (docs/adr/003-session-management.md).
+#
+# Blizzard's roster endpoint returns ranks as bare integers with no names, and has
+# no concept of an officer, so both live here. Rank 0 is always the Guild Master.
+#
+# find_or_create_by! for the same reason as the settings above: renaming a rank or
+# promoting one to officer is an operational change, and re-running the seeds must
+# not undo it.
+[
+  [0, 'Caravan Leader', true],
+  [1, 'Council', true],
+  [2, 'Desert Fang', false],
+  [3, 'Scroll Sage', false],
+  [4, 'Scavenger', false],
+  [5, 'Pathfinder', false],
+  [6, 'New Tail', false],
+  [7, 'Caravan Friend', false],
+  [8, 'Friend/OOC Alt', false],
+  [9, 'Neighbour', false]
+].each do |rank, name, officer|
+  WorldOfWarcraft::GuildRank.find_or_create_by!(rank: rank) do |guild_rank|
+    guild_rank.name = name
+    guild_rank.officer = officer
+  end
+end
