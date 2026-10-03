@@ -1,8 +1,16 @@
 class AuthenticationController < ApplicationController
-  rescue_from BattleNet::Client::Error, with: :battle_net_unavailable
+  rescue_from BattleNet::ApiClient::Error, with: :battle_net_unavailable
 
-  # GET /login — shows the "connect to Battle.net" button, or the current session.
-  def login; end
+  # GET /login — shows the "connect to Battle.net" button, or the current session
+  # and the characters the background job has pulled for it so far.
+  def login
+    return unless signed_in?
+
+    @characters = current_account.characters
+                                 .includes(:world_of_warcraft_guild_rank)
+                                 .ordered_by_level
+    @guild_rank = current_account.highest_guild_rank
+  end
 
   # POST /auth/battle_net — starts the authorization code flow.
   #
@@ -17,7 +25,7 @@ class AuthenticationController < ApplicationController
     state = SecureRandom.urlsafe_base64(32)
     session[:battle_net_state] = state
 
-    redirect_to BattleNet::Client.new.authorize_url(state: state), allow_other_host: true
+    redirect_to BattleNet::ApiClient.new.authorize_url(state: state), allow_other_host: true
   end
 
   # GET /callback — Battle.net sends the user back here with a code and our state.
@@ -37,18 +45,20 @@ class AuthenticationController < ApplicationController
 
   private
 
-  # Establishes identity and pulls the World of Warcraft data in the same request:
-  # the access token does not outlive it, so there is no second chance.
+  # Establishes identity, then hands the World of Warcraft pull to a background
+  # job so a slow roster cannot hold up the login (ADR-003). The access token goes
+  # with it sealed in an encrypted envelope, because it has to outlive this request
+  # for the job to have anything to spend.
   def authenticate(code)
-    battle_net = BattleNet::Client.new.authenticate(code: code)
+    battle_net = BattleNet::ApiClient.new.authenticate(code: code)
     account = Account.from_userinfo(battle_net.userinfo)
-    Services::GuildSynchronization.new(account: account, session: battle_net).call
+    FetchCharactersJob.perform_later(account, battle_net.sealed)
 
     account
   end
 
   def callback_uri
-    @callback_uri ||= URI(BattleNet::Client.new.redirect_uri)
+    @callback_uri ||= URI(BattleNet::ApiClient.new.redirect_uri)
   end
 
   def canonical_host?
@@ -74,8 +84,7 @@ class AuthenticationController < ApplicationController
   end
 
   def sign_in(account)
-    reset_session
-    session[:account_id] = account.id
+    start_session(account)
 
     redirect_to root_path, notice: t('authentication.signed_in', battletag: account.battletag)
   end

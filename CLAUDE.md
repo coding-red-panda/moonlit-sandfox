@@ -66,6 +66,8 @@ RuboCop uses the **official gem with stock defaults** (`rubocop` plus the `rails
 - The repo is at zero offences. Keep it there.
 - Controllers need to remain lean and pass business logic to service objects in `app/models/services`
 - Models remain lean and act purely as POCO objects with basic AR logic for validation.
+- Class names must reflect what the object represents, e.g `AuthenticationService` vs `Authentication` and `BlizzardClient` vs `Client`
+- Method names must be semantic, avoid general `.call` implementations.
 
 ## Testing
 
@@ -96,39 +98,68 @@ rejected (unmaintained since 2018, pins the vulnerable OmniAuth 1.x line).
 
 - Endpoints live on `oauth.battle.net`; data APIs on `eu.api.blizzard.com`. Different hosts.
 - Non-secret config in `config/battle_net.yml`; `client_id`/`client_secret` in credentials.
-- Access tokens are **never persisted** — Battle.net issues no usable refresh token, so the
-  callback spends the token in-request and discards it. `Client#authenticate` returns a
-  `BattleNet::Session` holding the live token; anything needing WoW data must run inside
-  that request.
-- `Services::GuildSynchronization` pulls the WoW profile and guild roster on every login
-  and dumps them to `log/payloads` (gitignored). It writes nothing to the database and
-  never raises — a failed pull must not cost the user their login.
+- Access tokens are **never stored in the clear**. Battle.net issues no usable refresh
+  token, so a token is exchanged and spent and then gone. `BattleNet::ApiClient#authenticate`
+  returns a `BattleNet::AccessToken` holding the live token, which is never exposed as an
+  attribute and is redacted from `#inspect`.
+- The one exception is `FetchCharactersJob`, which needs the user's token after the request
+  has ended. It receives `AccessToken#sealed` — ciphertext under a key salted off
+  `secret_key_base`, expiring with the token's own 24 hours — and opens it with
+  `AccessToken.unseal`. The job sets `log_arguments = false`. **Never pass a raw token to a
+  job**; the arguments are serialised into the Solid Queue tables. See ADR-003.
+- `Services::PayloadRecorder` dumps raw API responses to `log/payloads` (gitignored). It is
+  a reconnaissance tool for endpoints not yet modelled; nothing calls it on the login path
+  any more.
 - The guild to match against lives in the `settings` table, not in config:
   `guild.realm_slug` = `argent-dawn`, `guild.name_slug` = `moonlit-sandfox`. Seeded by
   `bin/rails db:seed`; if cleared, the roster call is skipped and login still works.
 - Guild and roster endpoints need no user token — a `client_credentials` token is enough.
   Only `/profile/user/wow` requires the signed-in user's session.
 - `accounts.battle_net_id` is the `sub` claim, not the battletag (battletags are mutable).
-- The session holds nothing but `account_id`. `current_account` / `signed_in?` /
-  `require_authentication` live in `ApplicationController`.
+- The session holds `account_id` and `expires_at`, and nothing else. `current_account` /
+  `signed_in?` / `require_authentication` / `start_session` live in `ApplicationController`.
+- **Sessions last 12 hours** (ADR-003). `config/initializers/session_store.rb` sets both
+  `expire_after` and `config.x.session_duration`. The cookie's expiry is advisory, so the
+  deadline is re-checked server-side on every request — do not rely on `expire_after` alone.
 - PKCE is unavailable on Battle.net, so `state` is the only forgery defence. Do not drop it.
 - **Browse to `http://localhost:3000`, not the `http://127.0.0.1:3000` that `bin/dev` prints.**
   Session cookies are per-host, so starting the flow on one and returning on the other loses
   the state and fails the login. `create` redirects to the canonical host to prevent this;
   request specs must `host! 'localhost'`.
 
-ADR-002 is complete: identity, and the guild data fetch that feeds off it, are both built.
-Turning ranks into permissions is authorization and belongs to a future ADR, which is itself
-blocked on an admin panel ADR. Do not build rank-based permissions before those exist.
+ADR-002 and ADR-003 are both complete: identity, the 12-hour session, and the character and
+rank data that feed off them are built. Turning ranks into permissions is authorization and
+belongs to a future ADR, which is itself blocked on an admin panel ADR. Do not build
+rank-based permissions before those exist — `guild_ranks.officer` is stored, not enforced.
+
+## World of Warcraft data
+
+Pulled by background job after login (`docs/adr/003-session-management.md`), on Solid Queue.
+
+- `FetchCharactersJob` reads `/profile/user/wow` with the user's sealed token and runs
+  `Services::CharacterSynchronization`, then enqueues `SynchronizeGuildRanksJob`.
+- `SynchronizeGuildRanksJob` reads the guild roster with a `client_credentials` token
+  (`ApiClient#authenticate_application`) and runs `Services::GuildRankSynchronization`.
+- **The profile endpoint does not report guild membership.** Rank comes only from the roster,
+  matched to characters on `battle_net_character_id`. Characters outside the guild, and
+  characters on other realms, have no rank — the association is nullable.
+- **The roster returns bare integers for rank**: no names, no officer flag. Both live on
+  `WorldOfWarcraft::GuildRank` and are seeded by `bin/rails db:seed`. A rank the game has
+  but the seeds do not leaves the character rankless and logs a warning.
+- Synchronisation is a reconciliation, not an import: characters and game accounts absent
+  from the payload are destroyed. Keyed on the Battle.net id, so renames and realm transfers
+  update rather than orphan.
+- Tables are prefixed `world_of_warcraft_` via `WorldOfWarcraft.table_name_prefix`, or
+  `WorldOfWarcraft::Account` would share the top-level `accounts` table.
 
 ## Not yet decided
 
 Do not assume these exist; ask before building on them.
 
 - **Authorization** — no Pundit or CanCan. Guild-rank permissions are not built.
-- **Domain models** — `app/models` has `Account`, `Setting`, `BattleNet::Client`,
-  `BattleNet::Session` and the `Services::` objects only. Nothing models characters,
-  guilds or ranks yet — login records the raw API responses to `log/payloads` instead.
+- **Domain models** — characters, game accounts and guild ranks are modelled (ADR-003).
+  Guilds themselves are not: the one guild we care about lives in `settings`. Nothing
+  models realms, races, factions or professions.
 - **Soft deletes, admin UI, API layer** — none.
 
 ## Conventions
