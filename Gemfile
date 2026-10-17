@@ -20,7 +20,7 @@ gem 'jbuilder'
 # still passes them positionally, which breaks all cookie and session deserialization
 # on Rails 8.1.3.1 (rails/rails#58685). Fixed by rails/rails#58601 and backported to
 # 8-1-stable, but unreleased as of 8.1.3.1 — unpin once a Rails 8.1 release ships with it.
-gem 'json', '< 3'
+gem 'json', '< 4'
 
 # Use Active Model has_secure_password [https://guides.rubyonrails.org/active_model_basics.html#securepassword]
 # gem "bcrypt", "~> 3.1.7"
